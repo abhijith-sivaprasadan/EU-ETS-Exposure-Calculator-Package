@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Node / frontend
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+
+# Nest / TS build
+dist/
+**/dist/
+*.tsbuildinfo
+
+# OS/editor
+.DS_Store
+Thumbs.db
