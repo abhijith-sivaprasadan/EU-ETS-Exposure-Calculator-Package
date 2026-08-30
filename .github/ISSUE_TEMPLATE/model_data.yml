@@ -1,0 +1,22 @@
+name: Model or data issue
+description: Report a scientific assumption, numerical result, unit or provenance problem.
+body:
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Commit, environment, command, minimal config/input and solver status; do not include secrets or confidential data.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Expected and observed result
+      description: Include units, the equation or source, tolerance and a small numerical example.
+    validations:
+      required: true
+  - type: textarea
+    id: provenance
+    attributes:
+      label: Data and ownership
+      description: Source, version/date, licence and transformations; identify synthetic assumptions.

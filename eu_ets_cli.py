@@ -7,7 +7,6 @@ from pathlib import Path
 import sys
 
 from eu_ets_calc_io import (
-    WorkbookValidationError,
     compute_scope1_total_tco2,
     load_calc_table,
     load_eua_scenarios,
@@ -41,17 +40,16 @@ def main() -> int:
         print(f"ERROR: Workbook not found: {workbook}", file=sys.stderr)
         return 1
 
-    calc = load_calc_table(workbook)
-    factors = load_factors(workbook)
-    scenarios = load_eua_scenarios(workbook)
-
     try:
+        calc = load_calc_table(workbook)
+        factors = load_factors(workbook)
+        scenarios = load_eua_scenarios(workbook)
         warnings = validate_loaded_data(calc, factors, scenarios)
-    except WorkbookValidationError as exc:
+        scope1_total = compute_scope1_total_tco2(calc, factors)
+    except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
 
-    scope1_total = compute_scope1_total_tco2(calc, factors)
     scenarios = scenarios.copy()
     scenarios["ETS_cost_EUR"] = scenarios["EUA_EUR_per_tCO2"] * scope1_total
 
