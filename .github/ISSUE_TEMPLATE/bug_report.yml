@@ -1,0 +1,16 @@
+name: Bug report
+description: Report a reproducible software failure.
+body:
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps, environment and commit
+      description: Include a minimal command and input without credentials or private data.
+    validations:
+      required: true
+  - type: textarea
+    id: behaviour
+    attributes:
+      label: Expected behaviour and actual error
+    validations:
+      required: true

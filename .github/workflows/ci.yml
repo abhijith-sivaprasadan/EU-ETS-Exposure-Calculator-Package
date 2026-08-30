@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -29,3 +32,6 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -q
+
+      - name: Workbook scientific smoke test
+        run: python eu_ets_cli.py --workbook EU_ETS_Exposure_Calculator_Demo.xlsx

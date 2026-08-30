@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
+import numpy as np
 import pandas as pd
 
 
@@ -172,7 +173,7 @@ def validate_calc_dataframe(calc_df: pd.DataFrame) -> tuple[list[str], list[str]
         return errors, warnings
 
     period = calc_df["Period"].astype(str).str.strip()
-    period_is_yyyy_mm = period.str.fullmatch(r"\d{4}-\d{2}", na=False)
+    period_is_yyyy_mm = period.str.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", na=False)
     invalid_period_rows = calc_df.index[~period_is_yyyy_mm].tolist()
     if invalid_period_rows:
         errors.append(
@@ -221,6 +222,10 @@ def validate_factors(factors: Factors) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
 
+    for name, value in vars(factors).items():
+        if not np.isfinite(value):
+            errors.append(f"Factors: {name} must be finite.")
+
     if factors.gas_ef_tco2_per_mwh <= 0:
         errors.append("Factors: Natural gas EF must be > 0.")
     if factors.other_fuel_ef_tco2_per_mwh < 0:
@@ -266,7 +271,7 @@ def validate_scenarios(scenarios: pd.DataFrame) -> tuple[list[str], list[str]]:
         duplicates = names[names.duplicated(keep=False)].unique().tolist()
         errors.append(f"Scenario names must be unique. Duplicates: {duplicates}")
 
-    bad_price_rows = scenarios.index[(prices.isna()) | (prices <= 0)].tolist()
+    bad_price_rows = scenarios.index[(~np.isfinite(prices)) | (prices <= 0)].tolist()
     if bad_price_rows:
         errors.append(
             f"Scenario prices must be positive numbers. Invalid row indices: {bad_price_rows}"
@@ -316,25 +321,29 @@ def validate_loaded_data(
 
 
 def compute_scope1_total_tco2(calc_df: pd.DataFrame, factors: Factors) -> float:
-    """Compute Scope 1 emissions with fallback when formula result columns are empty."""
-    if "Scope1_tCO2" in calc_df.columns:
-        scope1_series = pd.to_numeric(calc_df["Scope1_tCO2"], errors="coerce")
-        if scope1_series.notna().any():
-            return float(scope1_series.fillna(0).sum())
+    """Sum Scope 1 with rowwise cache/input fallback; never drop missing rows.
 
-    gas_mwh = pd.to_numeric(calc_df.get("Gas_MWh_in"), errors="coerce")
-    if gas_mwh.isna().all():
-        gas_mwh = pd.to_numeric(calc_df.get("Gas_MWh_calc"), errors="coerce")
-    if gas_mwh.isna().all():
-        gas_nm3 = pd.to_numeric(calc_df.get("Gas_Nm3"), errors="coerce").fillna(0)
-        gas_mwh = gas_nm3 * factors.gas_kwh_per_nm3 / 1000.0
+    Optional other-fuel blanks mean zero. Gas input uses explicit MWh, cached
+    converted MWh, then Nm3. A missing Scope 1 cache triggers row recomputation.
+    Scope 2 electricity and purchased steam are excluded from this boundary.
+    """
+    errors, _ = validate_factors(factors)
+    if errors:
+        raise WorkbookValidationError("; ".join(errors))
 
-    other_fuel_mwh = pd.to_numeric(
-        calc_df.get("OtherFuel_MWh"), errors="coerce"
-    ).fillna(0)
+    def column(name):
+        values = calc_df.get(name, pd.Series(np.nan, index=calc_df.index))
+        return pd.to_numeric(values, errors="coerce")
 
-    scope1 = (
-        gas_mwh.fillna(0) * factors.gas_ef_tco2_per_mwh
-        + other_fuel_mwh * factors.other_fuel_ef_tco2_per_mwh
+    gas_mwh = column("Gas_MWh_in").fillna(column("Gas_MWh_calc"))
+    gas_mwh = gas_mwh.fillna(column("Gas_Nm3") * factors.gas_kwh_per_nm3 / 1000.0)
+    calculated = (
+        gas_mwh * factors.gas_ef_tco2_per_mwh
+        + column("OtherFuel_MWh").fillna(0) * factors.other_fuel_ef_tco2_per_mwh
     )
+    scope1 = column("Scope1_tCO2").fillna(calculated)
+    if not np.isfinite(scope1).all() or (scope1 < 0).any():
+        raise WorkbookValidationError(
+            "Scope 1 requires finite non-negative data for every row"
+        )
     return float(scope1.sum())

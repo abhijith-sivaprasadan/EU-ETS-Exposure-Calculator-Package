@@ -1,0 +1,14 @@
+name: Feature request
+description: Propose a bounded, testable capability.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Research or user problem
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Proposed scope and verification
+      description: State non-goals, assumptions, data sources and the numerical oracle or acceptance test.
