@@ -15,5 +15,10 @@ Scope 1 = 56187.70 tCO2 (rounded to two decimals). The synthetic partial-cache
 regression case changed from an incorrect 1.6 to 6.5 tCO2.
 
 This is model/software verification with synthetic inputs, not regulatory or
-facility-data validation. Calculation-core extraction, fully versioned factors
-and a complete UI/CLI equivalence audit remain research-release work.
+facility-data validation. The CLI total and dashboard time series now share a
+pure rowwise emissions core; regression tests check monthly and quarterly Scope 1
+and costs against the CLI on partial caches. Workbook fixtures cover missing
+optional columns, cached periods with blank formula values, and missing Calc rows.
+Existing caches are preserved: detecting stale but non-empty formula caches is not
+implemented. Fully versioned factors and a complete interactive UI/PDF audit
+remain research-release work.

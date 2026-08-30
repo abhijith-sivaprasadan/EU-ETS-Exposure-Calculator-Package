@@ -60,39 +60,40 @@ def load_calc_table(workbook_path: str | Path) -> pd.DataFrame:
     df = df[df["Period"].notna()].reset_index(drop=True)
     df["Period"] = df["Period"].astype(str)
 
-    if df.empty:
-        inputs = pd.read_excel(workbook_path, sheet_name="Inputs", header=None)
-        input_header_idx = _find_header_row(
-            inputs, {"period", "electricity (mwh)", "natural gas (nm3)"}
-        )
-        input_headers = inputs.iloc[input_header_idx].astype(str).str.strip().tolist()
-        input_df = inputs.iloc[input_header_idx + 1 :].copy()
-        input_df.columns = input_headers
-        input_df = input_df[input_df["Period"].notna()].reset_index(drop=True)
-        rename = {
-            "Electricity (MWh)": "Elec_MWh",
-            "Natural gas (Nm3)": "Gas_Nm3",
-            "Natural gas (Nm³)": "Gas_Nm3",
-            "Natural gas (MWh) [optional]": "Gas_MWh_in",
-            "Other fuel (MWh)": "OtherFuel_MWh",
-            "Steam (MWh)": "Steam_MWh",
-            "Production (t) [optional]": "Prod_t",
-        }
-        df = input_df.rename(columns=rename)
-        keep = ["Period", *[column for column in rename.values() if column in df]]
-        df = df.loc[:, list(dict.fromkeys(keep))].copy()
-        factors = load_factors(workbook_path)
-        df = _coerce_numeric(df, [column for column in keep if column != "Period"])
-        df["Gas_MWh_calc"] = df["Gas_Nm3"] * factors.gas_kwh_per_nm3 / 1000.0
-        gas_mwh = df["Gas_MWh_in"].fillna(df["Gas_MWh_calc"])
-        df["Scope1_tCO2"] = (
-            gas_mwh * factors.gas_ef_tco2_per_mwh
-            + df["OtherFuel_MWh"].fillna(0) * factors.other_fuel_ef_tco2_per_mwh
-        )
-        df["Scope2_tCO2"] = df["Elec_MWh"] * factors.electricity_grid_ef_tco2_per_mwh
-        df["Steam_tCO2"] = df["Steam_MWh"] * factors.steam_ef_tco2_per_mwh
-        df["Total_tCO2"] = df["Scope1_tCO2"] + df["Scope2_tCO2"] + df["Steam_tCO2"]
-        df["Period"] = df["Period"].astype(str)
+    # Calc caches can be incomplete by row or column. Join on Period (never
+    # row position), preserving existing caches while recovering Inputs-only rows.
+    with pd.ExcelFile(workbook_path) as workbook:
+        if "Inputs" in workbook.sheet_names:
+            inputs = pd.read_excel(workbook, sheet_name="Inputs", header=None)
+            input_header_idx = _find_header_row(
+                inputs, {"period", "electricity (mwh)", "natural gas (nm3)"}
+            )
+            input_df = inputs.iloc[input_header_idx + 1 :].copy()
+            input_df.columns = inputs.iloc[input_header_idx].astype(str).str.strip()
+            input_df = input_df[input_df["Period"].notna()].copy()
+            rename = {
+                "Electricity (MWh)": "Elec_MWh",
+                "Natural gas (Nm3)": "Gas_Nm3",
+                "Natural gas (Nm³)": "Gas_Nm3",
+                "Natural gas (MWh) [optional]": "Gas_MWh_in",
+                "Other fuel (MWh)": "OtherFuel_MWh",
+                "Steam (MWh)": "Steam_MWh",
+                "Production (t) [optional]": "Prod_t",
+            }
+            input_df = input_df.rename(columns=rename)
+            input_df = input_df.reindex(
+                columns=["Period", *dict.fromkeys(rename.values())]
+            )
+            input_df["Period"] = input_df["Period"].astype(str).str.strip()
+            df["Period"] = df["Period"].str.strip()
+            for label, table in [("Calc", df), ("Inputs", input_df)]:
+                if table["Period"].duplicated().any():
+                    raise WorkbookValidationError(f"{label}.Period has duplicates")
+            df = (
+                df.set_index("Period")
+                .combine_first(input_df.set_index("Period"))
+                .reset_index()
+            )
 
     numeric_cols = [
         "Elec_MWh",
@@ -111,7 +112,18 @@ def load_calc_table(workbook_path: str | Path) -> pd.DataFrame:
         "ETS_cost_Mid_€",
         "ETS_cost_High_€",
     ]
-    return _coerce_numeric(df, numeric_cols)
+    df = _coerce_numeric(df, numeric_cols)
+    # Expose the same derived columns whether caches were complete or absent.
+    rows = compute_emission_rows(df, load_factors(workbook_path))
+    for target, source in [
+        ("Gas_MWh_calc", "Gas_MWh_calc"),
+        ("Scope1_tCO2", "Scope1_tCO2_effective"),
+        ("Scope2_tCO2", "Scope2_tCO2_effective"),
+        ("Steam_tCO2", "Steam_tCO2_effective"),
+        ("Total_tCO2", "Total_tCO2_effective"),
+    ]:
+        df[target] = rows[source]
+    return df
 
 
 def load_factors(workbook_path: str | Path) -> Factors:
@@ -320,30 +332,54 @@ def validate_loaded_data(
     return warnings
 
 
-def compute_scope1_total_tco2(calc_df: pd.DataFrame, factors: Factors) -> float:
-    """Sum Scope 1 with rowwise cache/input fallback; never drop missing rows.
+def compute_emission_rows(calc_df: pd.DataFrame, factors: Factors) -> pd.DataFrame:
+    """Shared pure rowwise calculations for the CLI and dashboard.
 
-    Optional other-fuel blanks mean zero. Gas input uses explicit MWh, cached
-    converted MWh, then Nm3. A missing Scope 1 cache triggers row recomputation.
-    Scope 2 electricity and purchased steam are excluded from this boundary.
+    Existing finite caches take precedence; this is not a stale-cache detector.
+    Missing gas is an error unless Scope 1 is cached. Optional other fuel/steam
+    blanks mean zero; missing electricity remains unknown, not zero.
     """
     errors, _ = validate_factors(factors)
     if errors:
         raise WorkbookValidationError("; ".join(errors))
+    rows = calc_df.copy()
 
     def column(name):
-        values = calc_df.get(name, pd.Series(np.nan, index=calc_df.index))
-        return pd.to_numeric(values, errors="coerce")
+        return pd.to_numeric(
+            rows.get(name, pd.Series(np.nan, index=rows.index)), errors="coerce"
+        )
 
-    gas_mwh = column("Gas_MWh_in").fillna(column("Gas_MWh_calc"))
-    gas_mwh = gas_mwh.fillna(column("Gas_Nm3") * factors.gas_kwh_per_nm3 / 1000.0)
-    calculated = (
-        gas_mwh * factors.gas_ef_tco2_per_mwh
-        + column("OtherFuel_MWh").fillna(0) * factors.other_fuel_ef_tco2_per_mwh
+    rows["Gas_MWh_calc"] = column("Gas_MWh_calc").fillna(
+        column("Gas_Nm3") * factors.gas_kwh_per_nm3 / 1000.0
     )
-    scope1 = column("Scope1_tCO2").fillna(calculated)
+    rows["Gas_MWh_effective"] = column("Gas_MWh_in").fillna(rows["Gas_MWh_calc"])
+    for name in ["OtherFuel_MWh", "Steam_MWh"]:
+        rows[name] = column(name).fillna(0)
+    for name in ["Elec_MWh", "Prod_t"]:
+        rows[name] = column(name)
+    rows["Scope1_tCO2_calc"] = (
+        rows["Gas_MWh_effective"] * factors.gas_ef_tco2_per_mwh
+        + rows["OtherFuel_MWh"] * factors.other_fuel_ef_tco2_per_mwh
+    )
+    rows["Scope2_tCO2_calc"] = (
+        rows["Elec_MWh"] * factors.electricity_grid_ef_tco2_per_mwh
+    )
+    rows["Steam_tCO2_calc"] = rows["Steam_MWh"] * factors.steam_ef_tco2_per_mwh
+    for scope in ["Scope1", "Scope2", "Steam"]:
+        rows[f"{scope}_tCO2_effective"] = column(f"{scope}_tCO2").fillna(
+            rows[f"{scope}_tCO2_calc"]
+        )
+    scope1 = rows["Scope1_tCO2_effective"]
     if not np.isfinite(scope1).all() or (scope1 < 0).any():
         raise WorkbookValidationError(
             "Scope 1 requires finite non-negative data for every row"
         )
-    return float(scope1.sum())
+    rows["Total_tCO2_effective"] = (
+        scope1 + rows["Scope2_tCO2_effective"] + rows["Steam_tCO2_effective"]
+    )
+    return rows
+
+
+def compute_scope1_total_tco2(calc_df: pd.DataFrame, factors: Factors) -> float:
+    """Sum shared rowwise Scope 1; exclude Scope 2 electricity and steam."""
+    return float(compute_emission_rows(calc_df, factors)["Scope1_tCO2_effective"].sum())

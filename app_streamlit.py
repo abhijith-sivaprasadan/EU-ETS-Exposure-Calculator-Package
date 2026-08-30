@@ -16,6 +16,7 @@ import streamlit as st
 
 from eu_ets_calc_io import (
     WorkbookValidationError,
+    compute_emission_rows,
     compute_scope1_total_tco2,
     load_calc_table,
     load_eua_scenarios,
@@ -65,47 +66,7 @@ def _prepare_ets_timeseries(
     ts["Period_dt"] = pd.to_datetime(ts["Period"], errors="coerce")
     ts = ts.dropna(subset=["Period_dt"]).sort_values("Period_dt").reset_index(drop=True)
 
-    gas_mwh = pd.to_numeric(ts.get("Gas_MWh_in"), errors="coerce")
-    if gas_mwh.isna().all():
-        gas_mwh = pd.to_numeric(ts.get("Gas_MWh_calc"), errors="coerce")
-    if gas_mwh.isna().all():
-        gas_nm3 = pd.to_numeric(ts.get("Gas_Nm3"), errors="coerce").fillna(0)
-        gas_mwh = gas_nm3 * factors.gas_kwh_per_nm3 / 1000.0
-
-    ts["Gas_MWh_effective"] = gas_mwh.fillna(0)
-    ts["OtherFuel_MWh"] = pd.to_numeric(
-        ts.get("OtherFuel_MWh"), errors="coerce"
-    ).fillna(0)
-    ts["Elec_MWh"] = pd.to_numeric(ts.get("Elec_MWh"), errors="coerce").fillna(0)
-    ts["Steam_MWh"] = pd.to_numeric(ts.get("Steam_MWh"), errors="coerce").fillna(0)
-    ts["Prod_t"] = pd.to_numeric(ts.get("Prod_t"), errors="coerce")
-
-    scope1_loaded = pd.to_numeric(ts.get("Scope1_tCO2"), errors="coerce")
-    ts["Scope1_tCO2_calc"] = (
-        ts["Gas_MWh_effective"] * factors.gas_ef_tco2_per_mwh
-        + ts["OtherFuel_MWh"] * factors.other_fuel_ef_tco2_per_mwh
-    )
-    ts["Scope1_tCO2_effective"] = np.where(
-        scope1_loaded.notna(), scope1_loaded, ts["Scope1_tCO2_calc"]
-    )
-
-    scope2_loaded = pd.to_numeric(ts.get("Scope2_tCO2"), errors="coerce")
-    ts["Scope2_tCO2_calc"] = ts["Elec_MWh"] * factors.electricity_grid_ef_tco2_per_mwh
-    ts["Scope2_tCO2_effective"] = np.where(
-        scope2_loaded.notna(), scope2_loaded, ts["Scope2_tCO2_calc"]
-    )
-
-    steam_loaded = pd.to_numeric(ts.get("Steam_tCO2"), errors="coerce")
-    ts["Steam_tCO2_calc"] = ts["Steam_MWh"] * factors.steam_ef_tco2_per_mwh
-    ts["Steam_tCO2_effective"] = np.where(
-        steam_loaded.notna(), steam_loaded, ts["Steam_tCO2_calc"]
-    )
-
-    ts["Total_tCO2_effective"] = (
-        ts["Scope1_tCO2_effective"]
-        + ts["Scope2_tCO2_effective"]
-        + ts["Steam_tCO2_effective"]
-    )
+    ts = compute_emission_rows(ts, factors)
 
     for _, row in scenarios.iterrows():
         scen = str(row["Scenario"]).strip()
@@ -147,7 +108,7 @@ def _aggregate_timeseries(ts_df: pd.DataFrame, granularity: str) -> pd.DataFrame
 
     grouped = (
         ts_df.set_index("Period_dt")
-        .resample("Q")
+        .resample(pd.offsets.QuarterEnd())
         .agg(agg_map)
         .reset_index()
         .rename(columns={"Period_dt": "Period_plot"})
