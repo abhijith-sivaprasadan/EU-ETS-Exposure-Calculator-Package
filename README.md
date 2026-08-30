@@ -97,6 +97,7 @@ Generate the latest demo pack (single-site + portfolio):
 - Electricity-related emissions are shown as Scope 2 context and are not treated as direct allowance liability by default.
 - Scope 3 is optional and modeled as a proxy factor for planning only.
 - Assumptions (factors, conversions, EUA prices) are explicit and editable in workbook inputs.
+- `docs/data_provenance.md` defines the source, unit, vintage, and boundary records required before operational use.
 
 ## Reliability / QA
 - Input schema and range validation
