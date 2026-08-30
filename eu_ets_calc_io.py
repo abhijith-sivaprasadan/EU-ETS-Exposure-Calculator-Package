@@ -44,7 +44,12 @@ def _coerce_numeric(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
 
 
 def load_calc_table(workbook_path: str | Path) -> pd.DataFrame:
-    """Load Calc table by detecting the row that contains the table header."""
+    """Load the Calc table, deriving inputs when formula caches are unavailable.
+
+    Spreadsheet formulas are not evaluated by pandas/openpyxl. Some workbook editors
+    save formula cells without cached values, so a clean checkout may otherwise appear
+    to have an empty Calc sheet.
+    """
     raw = pd.read_excel(workbook_path, sheet_name="Calc", header=None)
     header_idx = _find_header_row(raw, {"period", "elec_mwh", "gas_nm3"})
 
@@ -53,6 +58,40 @@ def load_calc_table(workbook_path: str | Path) -> pd.DataFrame:
     df.columns = headers
     df = df[df["Period"].notna()].reset_index(drop=True)
     df["Period"] = df["Period"].astype(str)
+
+    if df.empty:
+        inputs = pd.read_excel(workbook_path, sheet_name="Inputs", header=None)
+        input_header_idx = _find_header_row(
+            inputs, {"period", "electricity (mwh)", "natural gas (nm3)"}
+        )
+        input_headers = inputs.iloc[input_header_idx].astype(str).str.strip().tolist()
+        input_df = inputs.iloc[input_header_idx + 1 :].copy()
+        input_df.columns = input_headers
+        input_df = input_df[input_df["Period"].notna()].reset_index(drop=True)
+        rename = {
+            "Electricity (MWh)": "Elec_MWh",
+            "Natural gas (Nm3)": "Gas_Nm3",
+            "Natural gas (Nm³)": "Gas_Nm3",
+            "Natural gas (MWh) [optional]": "Gas_MWh_in",
+            "Other fuel (MWh)": "OtherFuel_MWh",
+            "Steam (MWh)": "Steam_MWh",
+            "Production (t) [optional]": "Prod_t",
+        }
+        df = input_df.rename(columns=rename)
+        keep = ["Period", *[column for column in rename.values() if column in df]]
+        df = df.loc[:, list(dict.fromkeys(keep))].copy()
+        factors = load_factors(workbook_path)
+        df = _coerce_numeric(df, [column for column in keep if column != "Period"])
+        df["Gas_MWh_calc"] = df["Gas_Nm3"] * factors.gas_kwh_per_nm3 / 1000.0
+        gas_mwh = df["Gas_MWh_in"].fillna(df["Gas_MWh_calc"])
+        df["Scope1_tCO2"] = (
+            gas_mwh * factors.gas_ef_tco2_per_mwh
+            + df["OtherFuel_MWh"].fillna(0) * factors.other_fuel_ef_tco2_per_mwh
+        )
+        df["Scope2_tCO2"] = df["Elec_MWh"] * factors.electricity_grid_ef_tco2_per_mwh
+        df["Steam_tCO2"] = df["Steam_MWh"] * factors.steam_ef_tco2_per_mwh
+        df["Total_tCO2"] = df["Scope1_tCO2"] + df["Scope2_tCO2"] + df["Steam_tCO2"]
+        df["Period"] = df["Period"].astype(str)
 
     numeric_cols = [
         "Elec_MWh",

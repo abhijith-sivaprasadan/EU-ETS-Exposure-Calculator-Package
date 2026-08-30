@@ -44,8 +44,12 @@ This repository is intentionally EU ETS-focused. KPI/normalization workflows fro
 `python -m pytest -q`
 
 ## Scope note
-- ETS cost applies to direct (Scope 1) fuel-combustion emissions.
-- Electricity-related emissions are shown as Scope 2 reporting/proxy context.
+
+This is a synthetic scenario/exposure analysis tool, **not legal or compliance advice**.
+Direct fuel-combustion emissions define the Scope 1 exposure boundary in this model.
+Electricity and purchased steam are contextual emissions, not added to that exposure.
+All factors and EUA prices are editable demonstration assumptions, not current
+regulatory values. See [data provenance](docs/data_provenance.md).
 
 ## License
 MIT License. See `LICENSE`.
