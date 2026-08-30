@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using this metadata."
+title: "EU ETS Exposure Calculator Package"
+type: software
+authors:
+  - family-names: Sivaprasadan
+    given-names: Abhijith
+repository-code: "https://github.com/Aintnopsychopath/EU-ETS-Exposure-Calculator-Package"
+license: MIT
+
