@@ -53,3 +53,11 @@ regulatory values. See [data provenance](docs/data_provenance.md).
 
 ## License
 MIT License. See `LICENSE`.
+
+
+<!-- ci-workflow-coverage -->
+## Continuous integration
+
+[![CI](https://github.com/abhijith-sivaprasadan/EU-ETS-Exposure-Calculator-Package/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/abhijith-sivaprasadan/EU-ETS-Exposure-Calculator-Package/actions/workflows/ci.yml)
+
+See [CI coverage and limitations](CI.md) for the automated checks. The status badge tracks the default branch.
