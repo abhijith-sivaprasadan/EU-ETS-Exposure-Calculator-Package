@@ -58,6 +58,6 @@ MIT License. See `LICENSE`.
 <!-- ci-workflow-coverage -->
 ## Continuous integration
 
-[![CI](https://github.com/abhijith-sivaprasadan/EU-ETS-Exposure-Calculator-Package/actions/workflows/ci.yml/badge.svg?branch=codex%2Fci-publication)](https://github.com/abhijith-sivaprasadan/EU-ETS-Exposure-Calculator-Package/actions/workflows/ci.yml)
+[![CI](https://github.com/abhijith-sivaprasadan/EU-ETS-Exposure-Calculator-Package/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/abhijith-sivaprasadan/EU-ETS-Exposure-Calculator-Package/actions/workflows/ci.yml)
 
-See [CI coverage and limitations](CI.md) for the automated checks. The status badge tracks the published CI review branch.
+See [CI coverage and limitations](CI.md) for the automated checks. The status badge tracks the default branch.
